@@ -181,7 +181,7 @@ class BitSightStatistics(BitSight):
                     post_data,
                     DILIGENCE_HISTORICAL_STATISTICS_TABLE,
                     company_name,
-                    "diligence historical statistics",
+                    "diligence_historical_statistics",
                 )
             self.checkpoint_obj.save_checkpoint(
                 self.statistics_state,
