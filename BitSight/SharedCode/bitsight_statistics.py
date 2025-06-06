@@ -49,8 +49,8 @@ class BitSightStatistics(BitSight):
             ]
         )
         self.checkpoint_obj = CheckpointManager()
-        self.company_state = self.checkpoint_obj.get_state("statistics_company")
         self.statistics_state = self.checkpoint_obj.get_state(self.statistics_type)
+        self.company_state = self.checkpoint_obj.get_state(f"{self.statistics_state}_statistics_company")
         self.date_format = "%Y-%m-%d"
         self.statistics_path = ENDPOINTS[f"{self.statistics_type}_url"]
         self.companies_str = COMPANIES
