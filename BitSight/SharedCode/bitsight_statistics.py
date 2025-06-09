@@ -15,6 +15,9 @@ from .consts import (
     API_TOKEN,
     COMPANIES,
     DILIGENCE_HISTORICAL_STATISTICS_TABLE,
+    OBSERVATIONS_STATISTICS_TABLE,
+    INDUSTRIES_STATISTICS_TABLE,
+    DILIGENCE_STATISTICS_TABLE,
     DILIGENCE_HISTORICAL_STATISTICS_TYPE,
     DILIGENCE_STATISTICS_TYPE,
     ENDPOINTS,
@@ -439,10 +442,10 @@ class BitSightStatistics(BitSight):
         ]:
             self.get_risk_vector_data(
                 self.statistics_type,
-                self.observation_statistics_path.format(company_guid),
+                self.statistics_path.format(company_guid),
                 company_name,
                 company_guid,
-                self.observations_statistics_state,
+                self.statistics_state,
                 globals()[f"{self.statistics_type.upper()}_TABLE"],
             )
         elif self.statistics_type == DILIGENCE_HISTORICAL_STATISTICS_TYPE:
