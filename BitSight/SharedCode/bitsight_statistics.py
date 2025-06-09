@@ -53,7 +53,7 @@ class BitSightStatistics(BitSight):
         )
         self.checkpoint_obj = CheckpointManager()
         self.statistics_state = self.checkpoint_obj.get_state(self.statistics_type)
-        self.company_state = self.checkpoint_obj.get_state(f"{self.statistics_state}_statistics_company")
+        self.company_state = self.checkpoint_obj.get_state(f"{self.statistics_type}_statistics_company")
         self.date_format = "%Y-%m-%d"
         self.statistics_path = ENDPOINTS[f"{self.statistics_type}_url"]
         self.companies_str = COMPANIES
@@ -367,7 +367,7 @@ class BitSightStatistics(BitSight):
             applogger.exception("{} {} Error: {}".format(self.logs_starts_with, ALERT_GRAPH_STATISTICS_FUNC_NAME, err))
             raise BitSightException()
 
-    def get_all_copmanies_alerts_graph_statistics_details(self, logs_data, company_names):
+    def get_all_companies_alerts_graph_statistics_details(self, logs_data, company_names):
         """Fetch alerts, graph, and statistics details for all companies.
 
         Args:
@@ -396,8 +396,8 @@ class BitSightStatistics(BitSight):
             self.checkpoint_obj.save_checkpoint(
                 self.company_state,
                 company_name,
-                "statistics_company",
-                "{}_{}".format(ALERTS_DATA_TABLE, "Statistics_Company_Checkpoint"),
+                f"{self.statistics_type}_statistics_company",
+                "{}_{}".format(globals()[f"{self.statistics_type.upper()}_TABLE"], "Company_Checkpoint"),
                 company_name_flag=True,
             )
 
@@ -492,7 +492,7 @@ class BitSightStatistics(BitSight):
             logs_data = sorted(logs_data, key=lambda x: x["name_s"])
             company_names = [data["name_s"] for data in logs_data]
             if (self.companies_str.strip()).lower() == "all":
-                self.get_all_copmanies_alerts_graph_statistics_details(logs_data, company_names)
+                self.get_all_companies_alerts_graph_statistics_details(logs_data, company_names)
             else:
                 self.get_specified_companies_alerts_graph_statistics_details(logs_data, company_names)
         except BitSightException:
