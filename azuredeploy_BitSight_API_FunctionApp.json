@@ -2581,7 +2581,7 @@
                 "WaitSection"
             ],
             "properties": {
-                "packageUri": "https://github.com/harsh-maradia/Harsh-Azure-Connectors/raw/refs/heads/main/BitSightAssetTest.zip",
+                "packageUri": "https://github.com/harsh-maradia/Harsh-Azure-Connectors/raw/refs/heads/main/BitSight330.zip",
                 "remoteBuild": true
             }
         },
