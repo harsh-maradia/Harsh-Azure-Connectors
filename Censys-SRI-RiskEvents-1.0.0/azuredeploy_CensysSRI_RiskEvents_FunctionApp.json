@@ -27,7 +27,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional. UTC time to start collecting from, for example 2026-10-01T00:00:00Z. Leave empty to start from 1970-01-01T00:00:00Z (all events Censys still retains)."
+        "description": "Optional. UTC time to start collecting from, for example 2026-10-01T00:00:00Z. Leave empty for full history (all events Censys still retains)."
       }
     },
     "SupplierIds": {
