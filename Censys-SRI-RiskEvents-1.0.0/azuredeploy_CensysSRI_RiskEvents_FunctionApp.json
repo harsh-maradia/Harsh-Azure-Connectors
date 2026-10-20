@@ -37,6 +37,13 @@
         "description": "Optional. Comma-separated Censys supplier UUIDs. Leave empty for all suppliers."
       }
     },
+    "RiskTypeIds": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Comma-separated Censys risk type IDs (CVE IDs such as CVE-2021-44228, or Censys catalog IDs such as CENSYS-2022-1194), up to 100. Leave empty for all risk types."
+      }
+    },
     "ChangeTypes": {
       "type": "string",
       "defaultValue": "",
@@ -87,26 +94,24 @@
         "description": "Enter the Object Id of your Microsoft Entra app (Enterprise application). It gets the Monitoring Metrics Publisher role on the data collection rule."
       }
     },
+    "WorkspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Log Analytics workspace of Microsoft Sentinel. Deploy this template in the resource group of that workspace. The template creates the table CensysRiskEvents_CL, a data collection endpoint and a data collection rule in it."
+      }
+    },
+    "Location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Region of the data collection endpoint and rule. It must be the region of the workspace."
+      }
+    },
     "Schedule": {
       "type": "string",
       "defaultValue": "0 */30 * * * *",
       "metadata": {
         "description": "Quartz (NCRONTAB) cron expression for how often the function runs. Default is every 30 minutes."
-      }
-    },
-    "WorkspaceId": {
-      "type": "string",
-      "minLength": 36,
-      "maxLength": 36,
-      "metadata": {
-        "description": "Workspace ID (GUID) of the Log Analytics workspace where the Censys CCF connector is deployed. Found on the workspace Overview page. The data collection rule and endpoint of that connector are located from it."
-      }
-    },
-    "Table_Name": {
-      "type": "string",
-      "defaultValue": "CensysRiskEvents",
-      "metadata": {
-        "description": "Name of the table the data collection rule writes to, without the _CL suffix. The stream name is Custom-<Table_Name>_CL. Please do not keep this field as empty else you will get validation error."
       }
     },
     "AppInsightsWorkspaceResourceID": {
@@ -134,11 +139,245 @@
     "storageBlobDataOwnerRoleId": "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
     "monitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
     "scope": "[concat(replace(environment().portal, 'portal', 'monitor'), '/.default')]",
+    "suffix": "[uniqueString(resourceGroup().id)]",
+    "dceName": "[concat('CensysSRIRiskEventsDCE', variables('suffix'))]",
+    "dcrName": "[concat('CensysSRIRiskEventsDCR', variables('suffix'))]",
     "dcrId": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]",
-    "dcrName": "[concat('Microsoft-Sentinel-CensysRiskEventsDCR-', take(parameters('WorkspaceId'), 12))]",
-    "dceName": "[concat('ASI-', parameters('WorkspaceId'))]"
+    "dceId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName'))]",
+    "tableName": "CensysRiskEvents_CL",
+    "streamName": "Custom-CensysRiskEvents_CL",
+    "workspaceResId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]"
   },
   "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[concat(parameters('WorkspaceName'), '/', variables('tableName'))]",
+      "properties": {
+        "plan": "Analytics",
+        "schema": {
+          "name": "[variables('tableName')]",
+          "columns": [
+            {
+              "name": "TimeGenerated",
+              "type": "datetime"
+            },
+            {
+              "name": "EventId",
+              "type": "string"
+            },
+            {
+              "name": "InsertedAt",
+              "type": "datetime"
+            },
+            {
+              "name": "OccurredAt",
+              "type": "datetime"
+            },
+            {
+              "name": "ChangeType",
+              "type": "string"
+            },
+            {
+              "name": "RiskInstanceId",
+              "type": "string"
+            },
+            {
+              "name": "SupplyChainId",
+              "type": "string"
+            },
+            {
+              "name": "AssetType",
+              "type": "string"
+            },
+            {
+              "name": "RiskTypeId",
+              "type": "string"
+            },
+            {
+              "name": "CveId",
+              "type": "string"
+            },
+            {
+              "name": "RiskCategory",
+              "type": "string"
+            },
+            {
+              "name": "RiskName",
+              "type": "string"
+            },
+            {
+              "name": "Description",
+              "type": "string"
+            },
+            {
+              "name": "Remediations",
+              "type": "dynamic"
+            },
+            {
+              "name": "Severity",
+              "type": "string"
+            },
+            {
+              "name": "Score",
+              "type": "real"
+            },
+            {
+              "name": "Confidence",
+              "type": "real"
+            },
+            {
+              "name": "Status",
+              "type": "string"
+            },
+            {
+              "name": "ResolveTime",
+              "type": "datetime"
+            },
+            {
+              "name": "ResolveReason",
+              "type": "string"
+            },
+            {
+              "name": "SupplierId",
+              "type": "string"
+            },
+            {
+              "name": "SupplierDisplayName",
+              "type": "string"
+            },
+            {
+              "name": "Suppliers",
+              "type": "dynamic"
+            },
+            {
+              "name": "AssetIp",
+              "type": "string"
+            },
+            {
+              "name": "AssetHostname",
+              "type": "string"
+            },
+            {
+              "name": "AssetPort",
+              "type": "int"
+            },
+            {
+              "name": "ServiceTransportProtocol",
+              "type": "string"
+            },
+            {
+              "name": "ServicePort",
+              "type": "int"
+            },
+            {
+              "name": "ServiceProtocol",
+              "type": "string"
+            },
+            {
+              "name": "Tags",
+              "type": "dynamic"
+            },
+            {
+              "name": "RapidResponse",
+              "type": "bool"
+            },
+            {
+              "name": "Evidence",
+              "type": "string"
+            },
+            {
+              "name": "FirstDetectedAt",
+              "type": "datetime"
+            },
+            {
+              "name": "LastDetectedAt",
+              "type": "datetime"
+            },
+            {
+              "name": "CreatedAt",
+              "type": "datetime"
+            },
+            {
+              "name": "PlatformUrl",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2022-06-01",
+      "name": "[variables('dceName')]",
+      "location": "[parameters('Location')]",
+      "kind": "Linux",
+      "properties": {
+        "description": "Data collection endpoint of the Censys SRI function connector",
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[variables('dcrName')]",
+      "location": "[parameters('Location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('WorkspaceName'), variables('tableName'))]",
+        "[variables('dceId')]"
+      ],
+      "properties": {
+        "dataCollectionEndpointId": "[variables('dceId')]",
+        "streamDeclarations": {
+          "[variables('streamName')]": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "inserted_at",
+                "type": "datetime"
+              },
+              {
+                "name": "occurred_at",
+                "type": "datetime"
+              },
+              {
+                "name": "change_type",
+                "type": "string"
+              },
+              {
+                "name": "risk_instance",
+                "type": "dynamic"
+              }
+            ]
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "workspaceResourceId": "[variables('workspaceResId')]",
+              "name": "clv2ws1"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "[variables('streamName')]"
+            ],
+            "destinations": [
+              "clv2ws1"
+            ],
+            "transformKql": "source | extend ri = todynamic(risk_instance) | extend TimeGenerated = todatetime(occurred_at), EventId = tostring(id), InsertedAt = todatetime(inserted_at), OccurredAt = todatetime(occurred_at), ChangeType = tostring(change_type), RiskInstanceId = tostring(ri.id), SupplyChainId = tostring(ri.supply_chain_id), AssetType = tostring(ri.asset_type), RiskTypeId = tostring(ri.risk_type_id), CveId = iff(tostring(ri.risk_type_id) matches regex @'^CVE-[0-9]{4}-[0-9]+$', tostring(ri.risk_type_id), ''), RiskCategory = tostring(ri.risk_category), RiskName = tostring(ri.risk_name), Description = tostring(ri.description), Remediations = todynamic(ri.remediations), Severity = tostring(ri.severity), Score = toreal(ri.score), Confidence = toreal(ri.confidence), Status = tostring(ri.status), ResolveTime = todatetime(ri.resolve_time), ResolveReason = tostring(ri.resolve_reason), SupplierId = tostring(ri.suppliers[0].id), SupplierDisplayName = tostring(ri.suppliers[0].display_name), Suppliers = todynamic(ri.suppliers), AssetIp = tostring(ri.host.ip), AssetHostname = tostring(ri.web.hostname), AssetPort = toint(ri.web.port), ServiceTransportProtocol = tostring(ri.service.transport_protocol), ServicePort = toint(ri.service.port), ServiceProtocol = tostring(ri.service.protocol), Tags = todynamic(ri.tags), RapidResponse = tobool(ri.rapid_response), Evidence = tostring(ri.evidence), FirstDetectedAt = todatetime(ri.first_detected_at), LastDetectedAt = todatetime(ri.last_detected_at), CreatedAt = todatetime(ri.created_at), PlatformUrl = tostring(ri.platform_url) | project TimeGenerated, EventId, InsertedAt, OccurredAt, ChangeType, RiskInstanceId, SupplyChainId, AssetType, RiskTypeId, CveId, RiskCategory, RiskName, Description, Remediations, Severity, Score, Confidence, Status, ResolveTime, ResolveReason, SupplierId, SupplierDisplayName, Suppliers, AssetIp, AssetHostname, AssetPort, ServiceTransportProtocol, ServicePort, ServiceProtocol, Tags, RapidResponse, Evidence, FirstDetectedAt, LastDetectedAt, CreatedAt, PlatformUrl",
+            "outputStream": "[variables('streamName')]"
+          }
+        ]
+      }
+    },
     {
       "type": "Microsoft.Insights/components",
       "apiVersion": "2020-02-02",
@@ -293,7 +532,9 @@
           "type": "config",
           "name": "appsettings",
           "dependsOn": [
-            "[concat('Microsoft.Web/sites/', variables('FunctionName'))]"
+            "[concat('Microsoft.Web/sites/', variables('FunctionName'))]",
+            "[variables('dcrId')]",
+            "[variables('dceId')]"
           ],
           "properties": {
             "APPINSIGHTS_INSTRUMENTATIONKEY": "[reference(resourceId('Microsoft.Insights/components', variables('FunctionName')), '2015-05-01').InstrumentationKey]",
@@ -303,14 +544,15 @@
             "OrganizationId": "[parameters('OrganizationId')]",
             "InitialStartTime": "[parameters('InitialStartTime')]",
             "SupplierIds": "[parameters('SupplierIds')]",
+            "RiskTypeIds": "[parameters('RiskTypeIds')]",
             "ChangeTypes": "[parameters('ChangeTypes')]",
             "Severity": "[parameters('Severity')]",
             "RapidResponse": "[parameters('RapidResponse')]",
             "Schedule": "[parameters('Schedule')]",
             "LogLevel": "[parameters('LogLevel')]",
-            "StreamName": "[concat('Custom-', parameters('Table_Name'), '_CL')]",
+            "StreamName": "[variables('streamName')]",
             "SCOPE": "[variables('scope')]",
-            "AZURE_DATA_COLLECTION_ENDPOINT": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), '2023-03-11').logsIngestion.endpoint]",
+            "AZURE_DATA_COLLECTION_ENDPOINT": "[reference(variables('dceId'), '2022-06-01').logsIngestion.endpoint]",
             "AZURE_DATA_COLLECTION_RULE_ID": "[reference(variables('dcrId'), '2023-03-11').immutableId]",
             "AZURE_CLIENT_ID": "[parameters('Azure_Client_Id')]",
             "AZURE_CLIENT_SECRET": "[parameters('Azure_Client_Secret')]",
@@ -339,7 +581,9 @@
       "apiVersion": "2022-04-01",
       "name": "[guid(variables('dcrId'), variables('monitoringMetricsPublisherRoleId'), parameters('Azure_Entra_Object_Id'))]",
       "scope": "[variables('dcrId')]",
-      "dependsOn": [],
+      "dependsOn": [
+        "[variables('dcrId')]"
+      ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
         "principalType": "ServicePrincipal",
