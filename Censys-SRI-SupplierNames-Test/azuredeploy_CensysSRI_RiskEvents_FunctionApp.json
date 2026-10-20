@@ -35,7 +35,7 @@
       "defaultValue": "",
       "maxLength": 500,
       "metadata": {
-        "description": "Optional. Names of the suppliers to collect risk events for, separated by asterisk(*). For example: OpenAI*Harvey*Acme, Inc. Names are not case-sensitive. Names that are not found among your suppliers are skipped with a warning. Leave empty to collect all suppliers. Maximum 500 characters."
+        "description": "Optional. Names of the suppliers to collect risk events for, separated by asterisk(*). For example: OpenAI*Harvey*Acme, Inc. Names are not case-sensitive. Names that are not found among your suppliers are skipped with a warning. Leave empty to collect all suppliers. A change applies from the next run and continues from the current position, so avoid changing it often. Maximum 500 characters."
       }
     },
     "RiskTypeIds": {
