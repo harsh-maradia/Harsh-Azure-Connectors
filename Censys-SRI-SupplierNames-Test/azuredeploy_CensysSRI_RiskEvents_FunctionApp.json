@@ -19,15 +19,17 @@
     },
     "OrganizationId": {
       "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
       "metadata": {
-        "description": "UUID of the Censys organization to collect risk events for."
+        "description": "UUID of the Censys organization to collect risk events for, for example 00000000-0000-0000-0000-000000000000."
       }
     },
     "InitialStartTime": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional. UTC time to start collecting from, for example 2026-10-01T00:00:00Z. Leave empty for full history (all events Censys still retains)."
+        "description": "Optional. UTC time to start collecting from, in the form 2026-10-01T00:00:00Z. It must not be in the future. Leave empty for full history (all events Censys still retains)."
       }
     },
     "SupplierNames": {
@@ -42,21 +44,22 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional. Comma-separated Censys risk type IDs (CVE IDs such as CVE-2021-44228, or Censys catalog IDs such as CENSYS-2022-1194), up to 100. Leave empty for all risk types."
-      }
+        "description": "Optional. Comma-separated Censys risk type IDs (CVE IDs such as CVE-2021-44228, or Censys catalog IDs such as CENSYS-2022-1194). Maximum 100 values and 1000 characters. Leave empty for all risk types."
+      },
+      "maxLength": 1000
     },
     "ChangeTypes": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional. Comma-separated change types: opened, resolved, reopened. Leave empty for all."
+        "description": "Optional. Comma-separated change types: opened, resolved, reopened. Other values stop the run with an error. Leave empty for all."
       }
     },
     "Severity": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional. Comma-separated severities: CRITICAL, HIGH, MEDIUM, LOW. Leave empty for all."
+        "description": "Optional. Comma-separated severities: CRITICAL, HIGH, MEDIUM, LOW. Other values stop the run with an error. Leave empty for all."
       }
     },
     "RapidResponse": {
@@ -112,14 +115,14 @@
       "type": "string",
       "defaultValue": "0 */30 * * * *",
       "metadata": {
-        "description": "Quartz (NCRONTAB) cron expression for how often the function runs. Default is every 30 minutes."
+        "description": "Quartz (NCRONTAB) cron expression for how often the function runs, for example 0 */30 * * * *. Do not run it more often than every 5 minutes. Default is every 30 minutes."
       }
     },
     "SuppliersSchedule": {
       "type": "string",
       "defaultValue": "0 0 */12 * * *",
       "metadata": {
-        "description": "Quartz (NCRONTAB) cron expression for how often the function that refreshes the list of supplier names and ids runs. It also runs once when the app starts. Default is every 12 hours."
+        "description": "Quartz (NCRONTAB) cron expression for how often the function that refreshes the list of supplier names and ids runs, for example 0 0 */12 * * *. It also runs once when the app starts. Default is every 12 hours."
       }
     },
     "AppInsightsWorkspaceResourceID": {
