@@ -1,0 +1,1763 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "FunctionName": {
+            "defaultValue": "BitSight",
+            "minLength": 1,
+            "maxLength": 11,
+            "type": "string"
+        },
+        "API_token": {
+            "type": "securestring",
+            "minLength": 1,
+            "metadata": {
+                "description": "Enter API Token of your BitSight account"
+            }
+        },
+        "Azure_Client_Id": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Enter Azure Client Id that you have created during app registration"
+            }
+        },
+        "Azure_Client_Secret": {
+            "type": "securestring",
+            "minLength": 1,
+            "metadata": {
+                "description": "Enter Azure Client Secret that you have created during creating the client secret"
+            }
+        },
+        "Azure_Tenant_Id": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Enter Azure Tenant Id of your Microsoft Entra ID"
+            }
+        },
+        "Azure_Entra_Object_Id": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Enter Object id of your Microsoft Entra App"
+            }
+        },
+        "Companies": {
+            "type": "string",
+            "defaultValue": "ALL",
+            "metadata": {
+                "description": "Please add valid company names separated by asterisk(*). For example: Actors Films*Goliath Investments LLC*HCL Group*Saperix, Inc."
+            }
+        },
+        "Location": {
+            "defaultValue": "[resourceGroup().location]",
+            "type": "string",
+            "metadata": {
+                "description": "The location in which the data collection rules and data collection endpoints should be deployed."
+            }
+        },
+        "WorkspaceName": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "Log analytics workspace name. Can be found under Log analytics \"Settings\"."
+            }
+        },
+        "Portfolio_Companies_Table_Name": {
+            "type": "string",
+            "defaultValue": "BitsightPortfolio_Companies",
+            "minLength": 1,
+            "maxLength": 42,
+            "metadata": {
+                "description": "Please do not keep this field as empty else you will get validation error"
+            }
+        },
+        "Alerts_Table_Name": {
+            "type": "string",
+            "defaultValue": "BitsightAlerts_data",
+            "minLength": 1,
+            "maxLength": 42,
+            "metadata": {
+                "description": "Please do not keep this field as empty else you will get validation error"
+            }
+        },
+        "Breaches_Table_Name": {
+            "type": "string",
+            "defaultValue": "BitsightBreaches_data",
+            "minLength": 1,
+            "maxLength": 42,
+            "metadata": {
+                "description": "Please do not keep this field as empty else you will get validation error"
+            }
+        },
+        "Findings_Table_Name": {
+            "type": "string",
+            "defaultValue": "BitsightFindings_data",
+            "minLength": 1,
+            "maxLength": 42,
+            "metadata": {
+                "description": "Please do not keep this field as empty else you will get validation error"
+            }
+        },
+        "LogLevel": {
+            "type": "string",
+            "defaultValue": "INFO",
+            "metadata": {
+                "description": "Select log level or log severity value from DEBUG, INFO, ERROR. By default it is set to INFO."
+            },
+            "allowedValues": [
+                "DEBUG",
+                "INFO",
+                "ERROR"
+            ]
+        },
+        "Schedule": {
+            "type": "string",
+            "defaultValue": "0 0 * * * *",
+            "metadata": {
+                "description": "Please enter a valid Quartz cron-expression. (Example: 0 0 * * * *)"
+            }
+        },
+        "Schedule_Portfolio": {
+            "type": "string",
+            "defaultValue": "0 */30 * * * *",
+            "metadata": {
+                "description": "Please enter a valid Quartz cron-expression. (Example: 0 */30 * * * *)"
+            }
+        },
+        "AppInsightsWorkspaceResourceID": {
+            "type": "string",
+            "metadata": {
+                "description": "Use 'Log Analytic Workspace-->Properties' blade having 'Resource ID' property value. This is a fully qualified resourceId which is in format '/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.OperationalInsights/workspaces/{workspaceName}'"
+            }
+        },
+        "VnetAddressPrefix": {
+            "type": "string",
+            "defaultValue": "10.20.0.0/16",
+            "metadata": {
+                "description": "Address space of the virtual network created for the Function App."
+            }
+        },
+        "FunctionSubnetPrefix": {
+            "type": "string",
+            "defaultValue": "10.20.1.0/26",
+            "metadata": {
+                "description": "Subnet used for Function App VNet integration (delegated to Microsoft.App/environments)."
+            }
+        },
+        "PrivateEndpointSubnetPrefix": {
+            "type": "string",
+            "defaultValue": "10.20.2.0/27",
+            "metadata": {
+                "description": "Subnet hosting the private endpoints for Storage, Key Vault and Azure Monitor."
+            }
+        },
+        "EnableKeyVaultPurgeProtection": {
+            "type": "bool",
+            "defaultValue": false,
+            "metadata": {
+                "description": "Enable purge protection on the Key Vault. Once enabled it cannot be disabled and blocks re-using the vault name until the retention period ends."
+            }
+        }
+    },
+    "variables": {
+        "FunctionName": "[concat(toLower(parameters('FunctionName')), uniqueString(resourceGroup().id))]",
+        "suffix": "[concat('A', uniqueString(resourceGroup().id))]",
+        "endpointName": "[concat(toLower(parameters('FunctionName')),'LogsEndpoint', variables('suffix'))]",
+        "logWsResId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+        "portfolioCompaniesRuleName": "[concat(toLower(parameters('FunctionName')),'PortFolioCompaniesCollectionRule', variables('suffix'))]",
+        "dataRuleName": "[concat(toLower(parameters('FunctionName')),'dataCollectionRule', variables('suffix'))]",
+        "dcrRoleName": "[concat(toLower(parameters('FunctionName')),'EntraRole', variables('suffix'))]",
+        "dcrRoleId": "[guid(subscription().id, string(variables('dcrRoleName')))]",
+        "scope": "[concat(replace(environment().portal, 'portal', 'monitor'), '/.default')]",
+        "deploymentStorageContainerName": "[concat('app-package-', 'bitsight')]",
+        "storageRoleDefinitionId": "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
+        "storageName": "[tolower(variables('FunctionName'))]",
+        "keyVaultName": "[concat('kv', uniqueString(resourceGroup().id, 'bitsight'))]",
+        "vnetName": "[concat(variables('FunctionName'), '-vnet')]",
+        "functionSubnetName": "snet-func",
+        "privateEndpointSubnetName": "snet-pe",
+        "functionSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('functionSubnetName'))]",
+        "privateEndpointSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('privateEndpointSubnetName'))]",
+        "amplsName": "[concat(variables('FunctionName'), '-ampls')]",
+        "peBlobName": "[concat(variables('FunctionName'), '-pe-blob')]",
+        "peTableName": "[concat(variables('FunctionName'), '-pe-table')]",
+        "peVaultName": "[concat(variables('FunctionName'), '-pe-vault')]",
+        "peMonitorName": "[concat(variables('FunctionName'), '-pe-ampls')]",
+        "monitorDnsSuffix": "[if(equals(environment().name, 'AzureUSGovernment'), 'us', if(equals(environment().name, 'AzureChinaCloud'), 'cn', 'com'))]",
+        "agentSvcDnsSuffix": "[if(equals(environment().name, 'AzureUSGovernment'), 'us', if(equals(environment().name, 'AzureChinaCloud'), 'cn', 'net'))]",
+        "blobDnsZoneName": "[concat('privatelink.blob.', environment().suffixes.storage)]",
+        "tableDnsZoneName": "[concat('privatelink.table.', environment().suffixes.storage)]",
+        "vaultDnsZoneName": "[replace(environment().suffixes.keyvaultDns, '.vault.', 'privatelink.vaultcore.')]",
+        "monitorDnsZoneName": "[concat('privatelink.monitor.azure.', variables('monitorDnsSuffix'))]",
+        "omsDnsZoneName": "[concat('privatelink.oms.opinsights.azure.', variables('monitorDnsSuffix'))]",
+        "odsDnsZoneName": "[concat('privatelink.ods.opinsights.azure.', variables('monitorDnsSuffix'))]",
+        "agentSvcDnsZoneName": "[concat('privatelink.agentsvc.azure-automation.', variables('agentSvcDnsSuffix'))]",
+        "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3",
+        "keyVaultSecretsUserRoleId": "4633458b-17de-408a-b874-0445c86b69e6",
+        "apiTokenSecretName": "API-token",
+        "clientSecretSecretName": "Azure-Client-Secret"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Insights/dataCollectionEndpoints",
+            "apiVersion": "2022-06-01",
+            "name": "[variables('endpointName')]",
+            "location": "[parameters('Location')]",
+            "kind": "Linux",
+            "properties": {
+                "description": "Data collection endpoint for ingestion api",
+                "networkAcls": {
+                    "publicNetworkAccess": "Disabled"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/tables",
+            "apiVersion": "2022-10-01",
+            "name": "[concat(parameters('WorkspaceName'), '/', parameters('Portfolio_Companies_Table_Name'), '_CL')]",
+            "properties": {
+                "plan": "Analytics",
+                "schema": {
+                    "name": "[concat(parameters('Portfolio_Companies_Table_Name'), '_CL')]",
+                    "columns": [
+                        {
+                            "name": "guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "TimeGenerated",
+                            "type": "datetime"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/tables",
+            "apiVersion": "2022-10-01",
+            "name": "[concat(parameters('WorkspaceName'), '/', parameters('Alerts_Table_Name'), '_CL')]",
+            "properties": {
+                "plan": "Analytics",
+                "schema": {
+                    "name": "[concat(parameters('Alerts_Table_Name'), '_CL')]",
+                    "columns": [
+                        {
+                            "name": "guid",
+                            "type": "real"
+                        },
+                        {
+                            "name": "alert_type",
+                            "type": "string"
+                        },
+                        {
+                            "name": "alert_date",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "start_date",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "company_name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "company_guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "company_url",
+                            "type": "string"
+                        },
+                        {
+                            "name": "folder_guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "folder_name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "severity",
+                            "type": "string"
+                        },
+                        {
+                            "name": "trigger",
+                            "type": "string"
+                        },
+                        {
+                            "name": "alert_set_name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "alert_set_guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "TimeGenerated",
+                            "type": "datetime"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/tables",
+            "apiVersion": "2022-10-01",
+            "name": "[concat(parameters('WorkspaceName'), '/', parameters('Findings_Table_Name'), '_CL')]",
+            "properties": {
+                "plan": "Analytics",
+                "schema": {
+                    "name": "[concat(parameters('Findings_Table_Name'), '_CL')]",
+                    "columns": [
+                        {
+                            "name": "affects_rating",
+                            "type": "boolean"
+                        },
+                        {
+                            "name": "assets",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "comments",
+                            "type": "string"
+                        },
+                        {
+                            "name": "company_name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "details",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "duration",
+                            "type": "string"
+                        },
+                        {
+                            "name": "evidence_key",
+                            "type": "string"
+                        },
+                        {
+                            "name": "first_seen",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "grace_period_end_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "guest_network_end_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "impacts_risk_vector_details",
+                            "type": "string"
+                        },
+                        {
+                            "name": "last_seen",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "no_rv_grade_impact_end_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "related_findings",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "remaining_decay",
+                            "type": "real"
+                        },
+                        {
+                            "name": "remediated",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "remediation_history_instant_rescan_details",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_refresh_reason_code",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_refresh_requester",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_refresh_status_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_refresh_status_label",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_refresh_status_reason",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_last_requested_refresh_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "remediation_history_result_finding_date",
+                            "type": "string"
+                        },
+                        {
+                            "name": "risk_category",
+                            "type": "string"
+                        },
+                        {
+                            "name": "risk_vector",
+                            "type": "string"
+                        },
+                        {
+                            "name": "risk_vector_label",
+                            "type": "string"
+                        },
+                        {
+                            "name": "rolledup_observation_id",
+                            "type": "string"
+                        },
+                        {
+                            "name": "severity",
+                            "type": "real"
+                        },
+                        {
+                            "name": "severity_category",
+                            "type": "string"
+                        },
+                        {
+                            "name": "tags",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "temporary_id",
+                            "type": "string"
+                        },
+                        {
+                            "name": "TimeGenerated",
+                            "type": "datetime"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces/tables",
+            "apiVersion": "2022-10-01",
+            "name": "[concat(parameters('WorkspaceName'), '/', parameters('Breaches_Table_Name'), '_CL')]",
+            "properties": {
+                "plan": "Analytics",
+                "schema": {
+                    "name": "[concat(parameters('Breaches_Table_Name'), '_CL')]",
+                    "columns": [
+                        {
+                            "name": "breached_companies",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "company_guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "company_name",
+                            "type": "string"
+                        },
+                        {
+                            "name": "parsed_date",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "date_created",
+                            "type": "datetime"
+                        },
+                        {
+                            "name": "dependent_companies",
+                            "type": "dynamic"
+                        },
+                        {
+                            "name": "event_type",
+                            "type": "string"
+                        },
+                        {
+                            "name": "event_type_description",
+                            "type": "string"
+                        },
+                        {
+                            "name": "guid",
+                            "type": "string"
+                        },
+                        {
+                            "name": "preview_url",
+                            "type": "string"
+                        },
+                        {
+                            "name": "severity",
+                            "type": "real"
+                        },
+                        {
+                            "name": "text",
+                            "type": "string"
+                        },
+                        {
+                            "name": "TimeGenerated",
+                            "type": "datetime"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Insights/dataCollectionRules",
+            "apiVersion": "2022-06-01",
+            "name": "[variables('portfolioCompaniesRuleName')]",
+            "location": "[parameters('Location')]",
+            "dependsOn": [
+                "[concat(variables('logWsResId'), '/tables/', parameters('Portfolio_Companies_Table_Name'), '_CL')]"
+            ],
+            "properties": {
+                "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))]",
+                "streamDeclarations": {
+                    "[concat('Custom-', parameters('Portfolio_Companies_Table_Name'))]": {
+                        "columns": [
+                            {
+                                "name": "guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "TimeGenerated",
+                                "type": "datetime"
+                            }
+                        ]
+                    }
+                },
+                "destinations": {
+                    "logAnalytics": [
+                        {
+                            "workspaceResourceId": "[parameters('AppInsightsWorkspaceResourceID')]",
+                            "name": "[concat('RuleDest', variables('suffix'))]"
+                        }
+                    ]
+                },
+                "dataFlows": [
+                    {
+                        "streams": [
+                            "[concat('Custom-', parameters('Portfolio_Companies_Table_Name'))]"
+                        ],
+                        "destinations": [
+                            "[concat('RuleDest', variables('suffix'))]"
+                        ],
+                        "transformKql": "source\n| extend TimeGenerated = todatetime(now())",
+                        "outputStream": "[concat('Custom-', parameters('Portfolio_Companies_Table_Name'), '_CL')]"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Insights/dataCollectionRules",
+            "apiVersion": "2022-06-01",
+            "name": "[variables('dataRuleName')]",
+            "location": "[parameters('Location')]",
+            "dependsOn": [
+                "[concat(variables('logWsResId'), '/tables/', parameters('Alerts_Table_Name'), '_CL')]",
+                "[concat(variables('logWsResId'), '/tables/', parameters('Findings_Table_Name'), '_CL')]",
+                "[concat(variables('logWsResId'), '/tables/', parameters('Breaches_Table_Name'), '_CL')]"
+            ],
+            "properties": {
+                "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))]",
+                "streamDeclarations": {
+                    "[concat('Custom-', parameters('Alerts_Table_Name'))]": {
+                        "columns": [
+                            {
+                                "name": "guid",
+                                "type": "real"
+                            },
+                            {
+                                "name": "alert_type",
+                                "type": "string"
+                            },
+                            {
+                                "name": "alert_date",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "start_date",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "company_name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "company_guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "company_url",
+                                "type": "string"
+                            },
+                            {
+                                "name": "folder_guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "folder_name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "severity",
+                                "type": "string"
+                            },
+                            {
+                                "name": "trigger",
+                                "type": "string"
+                            },
+                            {
+                                "name": "alert_set_name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "alert_set_guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "TimeGenerated",
+                                "type": "datetime"
+                            }
+                        ]
+                    },
+                    "[concat('Custom-', parameters('Findings_Table_Name'))]": {
+                        "columns": [
+                            {
+                                "name": "affects_rating",
+                                "type": "boolean"
+                            },
+                            {
+                                "name": "assets",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "comments",
+                                "type": "string"
+                            },
+                            {
+                                "name": "company_name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "details",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "duration",
+                                "type": "string"
+                            },
+                            {
+                                "name": "evidence_key",
+                                "type": "string"
+                            },
+                            {
+                                "name": "first_seen",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "grace_period_end_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "guest_network_end_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "impacts_risk_vector_details",
+                                "type": "string"
+                            },
+                            {
+                                "name": "last_seen",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "no_rv_grade_impact_end_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "related_findings",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "remaining_decay",
+                                "type": "real"
+                            },
+                            {
+                                "name": "remediated",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "remediation_history_instant_rescan_details",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_refresh_reason_code",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_refresh_requester",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_refresh_status_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_refresh_status_label",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_refresh_status_reason",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_last_requested_refresh_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "remediation_history_result_finding_date",
+                                "type": "string"
+                            },
+                            {
+                                "name": "risk_category",
+                                "type": "string"
+                            },
+                            {
+                                "name": "risk_vector",
+                                "type": "string"
+                            },
+                            {
+                                "name": "risk_vector_label",
+                                "type": "string"
+                            },
+                            {
+                                "name": "rolledup_observation_id",
+                                "type": "string"
+                            },
+                            {
+                                "name": "severity",
+                                "type": "real"
+                            },
+                            {
+                                "name": "severity_category",
+                                "type": "string"
+                            },
+                            {
+                                "name": "tags",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "temporary_id",
+                                "type": "string"
+                            },
+                            {
+                                "name": "TimeGenerated",
+                                "type": "datetime"
+                            }
+                        ]
+                    },
+                    "[concat('Custom-', parameters('Breaches_Table_Name'))]": {
+                        "columns": [
+                            {
+                                "name": "breached_companies",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "company_guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "company_name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "parsed_date",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "date_created",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "dependent_companies",
+                                "type": "dynamic"
+                            },
+                            {
+                                "name": "event_type",
+                                "type": "string"
+                            },
+                            {
+                                "name": "event_type_description",
+                                "type": "string"
+                            },
+                            {
+                                "name": "guid",
+                                "type": "string"
+                            },
+                            {
+                                "name": "preview_url",
+                                "type": "string"
+                            },
+                            {
+                                "name": "severity",
+                                "type": "real"
+                            },
+                            {
+                                "name": "text",
+                                "type": "string"
+                            },
+                            {
+                                "name": "TimeGenerated",
+                                "type": "datetime"
+                            }
+                        ]
+                    }
+                },
+                "destinations": {
+                    "logAnalytics": [
+                        {
+                            "workspaceResourceId": "[parameters('AppInsightsWorkspaceResourceID')]",
+                            "name": "[concat('RuleDest', variables('suffix'))]"
+                        }
+                    ]
+                },
+                "dataFlows": [
+                    {
+                        "streams": [
+                            "[concat('Custom-', parameters('Alerts_Table_Name'))]"
+                        ],
+                        "destinations": [
+                            "[concat('RuleDest', variables('suffix'))]"
+                        ],
+                        "transformKql": "source\n| extend TimeGenerated = todatetime(now())",
+                        "outputStream": "[concat('Custom-', parameters('Alerts_Table_Name'), '_CL')]"
+                    },
+                    {
+                        "streams": [
+                            "[concat('Custom-', parameters('Findings_Table_Name'))]"
+                        ],
+                        "destinations": [
+                            "[concat('RuleDest', variables('suffix'))]"
+                        ],
+                        "transformKql": "source\n| extend TimeGenerated = todatetime(now()), json_remediation_history = parse_json(remediation_history)\n| extend remediation_history_instant_rescan_details = tostring(json_remediation_history.instant_rescan_details), remediation_history_last_refresh_reason_code = tostring(json_remediation_history.last_refresh_reason_code), remediation_history_last_refresh_requester = tostring(json_remediation_history.last_refresh_requester), remediation_history_last_refresh_status_date = tostring(json_remediation_history.last_refresh_status_date), remediation_history_last_refresh_status_label = tostring(json_remediation_history.last_refresh_status_label), remediation_history_last_refresh_status_reason = tostring(json_remediation_history.last_refresh_status_reason), remediation_history_last_requested_refresh_date = tostring(json_remediation_history.last_requested_refresh_date), remediation_history_result_finding_date = tostring(json_remediation_history.result_finding_date)\n| project-away json_remediation_history, remediation_history",
+                        "outputStream": "[concat('Custom-', parameters('Findings_Table_Name'), '_CL')]"
+                    },
+                    {
+                        "streams": [
+                            "[concat('Custom-', parameters('Breaches_Table_Name'))]"
+                        ],
+                        "destinations": [
+                            "[concat('RuleDest', variables('suffix'))]"
+                        ],
+                        "transformKql": "source\n| extend TimeGenerated = todatetime(now())",
+                        "outputStream": "[concat('Custom-', parameters('Breaches_Table_Name'), '_CL')]"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleDefinitions",
+            "apiVersion": "2022-04-01",
+            "name": "[variables('dcrRoleId')]",
+            "properties": {
+                "assignableScopes": [
+                    "[resourceGroup().id]",
+                    "[resourceId('Microsoft.Insights/dataCollectionRules', variables('portfolioCompaniesRuleName'))]",
+                    "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dataRuleName'))]"
+                ],
+                "description": "Entra ID application access role",
+                "permissions": [
+                    {
+                        "actions": [
+                            "Microsoft.Insights/Register/Action",
+                            "Microsoft.Support/*",
+                            "Microsoft.Resources/subscriptions/resourceGroups/read"
+                        ],
+                        "dataActions": [
+                            "Microsoft.Insights/Metrics/Write",
+                            "Microsoft.Insights/Telemetry/Write"
+                        ]
+                    }
+                ],
+                "roleName": "[variables('dcrRoleName')]",
+                "type": "customRole"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceGroup().id, concat('Statistics DCR Role assignment', variables('FunctionName')))]",
+            "dependsOn": [
+                "[variables('dcrRoleId')]",
+                "[variables('portfolioCompaniesRuleName')]"
+            ],
+            "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('portfolioCompaniesRuleName'))]",
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('dcrRoleId'))]",
+                "principalId": "[parameters('Azure_Entra_Object_Id')]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceGroup().id, concat('Non Statistics DCR Role assignment', variables('FunctionName')))]",
+            "dependsOn": [
+                "[variables('dcrRoleId')]",
+                "[variables('dataRuleName')]"
+            ],
+            "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dataRuleName'))]",
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('dcrRoleId'))]",
+                "principalId": "[parameters('Azure_Entra_Object_Id')]"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/components",
+            "apiVersion": "2020-02-02",
+            "name": "[variables('FunctionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "web",
+            "properties": {
+                "Application_Type": "web",
+                "ApplicationId": "[variables('FunctionName')]",
+                "WorkspaceResourceId": "[parameters('AppInsightsWorkspaceResourceID')]",
+                "publicNetworkAccessForIngestion": "Disabled",
+                "publicNetworkAccessForQuery": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('vnetName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[parameters('VnetAddressPrefix')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('functionSubnetName')]",
+                        "properties": {
+                            "addressPrefix": "[parameters('FunctionSubnetPrefix')]",
+                            "defaultOutboundAccess": true,
+                            "delegations": [
+                                {
+                                    "name": "Microsoft.App.environments",
+                                    "properties": {
+                                        "serviceName": "Microsoft.App/environments"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "[variables('privateEndpointSubnetName')]",
+                        "properties": {
+                            "addressPrefix": "[parameters('PrivateEndpointSubnetPrefix')]",
+                            "defaultOutboundAccess": false,
+                            "privateEndpointNetworkPolicies": "Disabled"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('blobDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('blobDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('blobDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('tableDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('tableDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('tableDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('vaultDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('vaultDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('vaultDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('monitorDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('monitorDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('monitorDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('omsDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('omsDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('omsDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('odsDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('odsDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('odsDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('agentSvcDnsZoneName')]",
+            "location": "global",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "apiVersion": "2020-06-01",
+            "name": "[concat(variables('agentSvcDnsZoneName'), '/', variables('vnetName'), '-link')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', variables('agentSvcDnsZoneName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2023-05-01",
+            "name": "[variables('storageName')]",
+            "location": "[resourceGroup().location]",
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "publicNetworkAccess": "Disabled",
+                "allowSharedKeyAccess": false,
+                "allowBlobPublicAccess": false,
+                "defaultToOAuthAuthentication": true,
+                "networkAcls": {
+                    "bypass": "None",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Deny"
+                },
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                    "services": {
+                        "file": {
+                            "keyType": "Account",
+                            "enabled": true
+                        },
+                        "blob": {
+                            "keyType": "Account",
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                },
+                "minimumTlsVersion": "TLS1_2"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2023-05-01",
+            "name": "[concat(variables('FunctionName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName')))]"
+            ],
+            "properties": {
+                "cors": {
+                    "corsRules": []
+                },
+                "deleteRetentionPolicy": {
+                    "enabled": false
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2023-05-01",
+            "name": "[format('{0}/{1}/{2}', variables('FunctionName'), 'default', variables('deploymentStorageContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('FunctionName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/fileServices",
+            "apiVersion": "2023-05-01",
+            "name": "[concat(variables('FunctionName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName')))]"
+            ],
+            "properties": {
+                "cors": {
+                    "corsRules": []
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2023-12-01",
+            "name": "[variables('FunctionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "functionapp",
+            "sku": {
+                "tier": "FlexConsumption",
+                "name": "FC1"
+            },
+            "properties": {
+                "reserved": true
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults",
+            "apiVersion": "2023-07-01",
+            "name": "[variables('keyVaultName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "tenantId": "[subscription().tenantId]",
+                "sku": {
+                    "family": "A",
+                    "name": "standard"
+                },
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "softDeleteRetentionInDays": 90,
+                "enablePurgeProtection": "[if(parameters('EnableKeyVaultPurgeProtection'), true(), null())]",
+                "publicNetworkAccess": "Disabled",
+                "networkAcls": {
+                    "bypass": "None",
+                    "defaultAction": "Deny",
+                    "ipRules": [],
+                    "virtualNetworkRules": []
+                }
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2023-07-01",
+            "name": "[concat(variables('keyVaultName'), '/', variables('apiTokenSecretName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            ],
+            "properties": {
+                "value": "[parameters('API_token')]"
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2023-07-01",
+            "name": "[concat(variables('keyVaultName'), '/', variables('clientSecretSecretName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            ],
+            "properties": {
+                "value": "[parameters('Azure_Client_Secret')]"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/privateLinkScopes",
+            "apiVersion": "2021-07-01-preview",
+            "name": "[variables('amplsName')]",
+            "location": "global",
+            "properties": {
+                "accessModeSettings": {
+                    "ingestionAccessMode": "PrivateOnly",
+                    "queryAccessMode": "PrivateOnly"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
+            "apiVersion": "2021-07-01-preview",
+            "name": "[concat(variables('amplsName'), '/appinsights')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]",
+                "[resourceId('Microsoft.Insights/components', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "linkedResourceId": "[resourceId('Microsoft.Insights/components', variables('FunctionName'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
+            "apiVersion": "2021-07-01-preview",
+            "name": "[concat(variables('amplsName'), '/dce')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]",
+                "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))]"
+            ],
+            "properties": {
+                "linkedResourceId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
+            "apiVersion": "2021-07-01-preview",
+            "name": "[concat(variables('amplsName'), '/sentinel-workspace')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]"
+            ],
+            "properties": {
+                "linkedResourceId": "[variables('logWsResId')]"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
+            "apiVersion": "2021-07-01-preview",
+            "condition": "[not(equals(toLower(parameters('AppInsightsWorkspaceResourceID')), toLower(variables('logWsResId'))))]",
+            "name": "[concat(variables('amplsName'), '/appinsights-workspace')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]"
+            ],
+            "properties": {
+                "linkedResourceId": "[parameters('AppInsightsWorkspaceResourceID')]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('peBlobName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[variables('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('peBlobName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+                            "groupIds": [
+                                "blob"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2024-05-01",
+            "name": "[concat(variables('peBlobName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', variables('peBlobName'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('blobDnsZoneName'), concat(variables('vnetName'), '-link'))]"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "[replace(variables('blobDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('blobDnsZoneName'))]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('peTableName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peBlobName'), 'default')]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[variables('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('peTableName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+                            "groupIds": [
+                                "table"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2024-05-01",
+            "name": "[concat(variables('peTableName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', variables('peTableName'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('tableDnsZoneName'), concat(variables('vnetName'), '-link'))]"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "[replace(variables('tableDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('tableDnsZoneName'))]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('peVaultName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[variables('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('peVaultName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+                            "groupIds": [
+                                "vault"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2024-05-01",
+            "name": "[concat(variables('peVaultName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', variables('peVaultName'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('vaultDnsZoneName'), concat(variables('vnetName'), '-link'))]"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "[replace(variables('vaultDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('vaultDnsZoneName'))]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('peMonitorName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]",
+                "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'appinsights')]",
+                "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'dce')]",
+                "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'sentinel-workspace')]",
+                "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'appinsights-workspace')]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peVaultName'), 'default')]"
+            ],
+            "properties": {
+                "subnet": {
+                    "id": "[variables('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                    {
+                        "name": "[variables('peMonitorName')]",
+                        "properties": {
+                            "privateLinkServiceId": "[resourceId('Microsoft.Insights/privateLinkScopes', variables('amplsName'))]",
+                            "groupIds": [
+                                "azuremonitor"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+            "apiVersion": "2024-05-01",
+            "name": "[concat(variables('peMonitorName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', variables('peMonitorName'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('monitorDnsZoneName'), concat(variables('vnetName'), '-link'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('omsDnsZoneName'), concat(variables('vnetName'), '-link'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('odsDnsZoneName'), concat(variables('vnetName'), '-link'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('agentSvcDnsZoneName'), concat(variables('vnetName'), '-link'))]",
+                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('blobDnsZoneName'), concat(variables('vnetName'), '-link'))]"
+            ],
+            "properties": {
+                "privateDnsZoneConfigs": [
+                    {
+                        "name": "[replace(variables('monitorDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('monitorDnsZoneName'))]"
+                        }
+                    },
+                    {
+                        "name": "[replace(variables('omsDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('omsDnsZoneName'))]"
+                        }
+                    },
+                    {
+                        "name": "[replace(variables('odsDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('odsDnsZoneName'))]"
+                        }
+                    },
+                    {
+                        "name": "[replace(variables('agentSvcDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('agentSvcDnsZoneName'))]"
+                        }
+                    },
+                    {
+                        "name": "[replace(variables('blobDnsZoneName'), '.', '-')]",
+                        "properties": {
+                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('blobDnsZoneName'))]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2023-12-01",
+            "name": "[variables('FunctionName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('FunctionName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('FunctionName'), 'default', variables('deploymentStorageContainerName'))]",
+                "[resourceId('Microsoft.Insights/components', variables('FunctionName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peBlobName'), 'default')]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]"
+            ],
+            "kind": "functionapp,linux",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "name": "[variables('FunctionName')]",
+                "httpsOnly": true,
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('FunctionName'))]",
+                "virtualNetworkSubnetId": "[variables('functionSubnetId')]",
+                "functionAppConfig": {
+                    "deployment": {
+                        "storage": {
+                            "type": "blobContainer",
+                            "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName')))).primaryEndpoints.blob, variables('deploymentStorageContainerName'))]",
+                            "authentication": {
+                                "type": "SystemAssignedIdentity"
+                            }
+                        }
+                    },
+                    "scaleAndConcurrency": {
+                        "maximumInstanceCount": 40,
+                        "instanceMemoryMB": 2048
+                    },
+                    "runtime": {
+                        "name": "python",
+                        "version": "3.14"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites/config",
+            "apiVersion": "2023-12-01",
+            "name": "[concat(variables('FunctionName'), '/appsettings')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]",
+                "[guid(resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName'))), variables('storageRoleDefinitionId'))]",
+                "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), variables('storageTableDataContributorRoleId'))]",
+                "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('keyVaultSecretsUserRoleId'), variables('FunctionName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), variables('apiTokenSecretName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), variables('clientSecretSecretName'))]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peBlobName'), 'default')]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peVaultName'), 'default')]",
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peMonitorName'), 'default')]"
+            ],
+            "properties": {
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(resourceId('microsoft.insights/components', variables('FunctionName')), '2015-05-01').ConnectionString]",
+                "AzureWebJobsStorage__accountName": "[variables('storageName')]",
+                "AzureWebJobsStorage__credential": "managedidentity",
+                "AzureWebJobsStorage__blobServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob]",
+                "AzureWebJobsStorage__tableServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table]",
+                "API_token": "[concat('@Microsoft.KeyVault(VaultName=', variables('keyVaultName'), ';SecretName=', variables('apiTokenSecretName'), ')')]",
+                "Companies": "[parameters('Companies')]",
+                "Alerts_Table_Name": "[parameters('Alerts_Table_Name')]",
+                "Breaches_Table_Name": "[parameters('Breaches_Table_Name')]",
+                "Findings_Table_Name": "[parameters('Findings_Table_Name')]",
+                "LogLevel": "[parameters('LogLevel')]",
+                "Schedule": "[parameters('Schedule')]",
+                "Schedule_Portfolio": "[parameters('Schedule_Portfolio')]",
+                "AZURE_CLIENT_ID": "[parameters('Azure_Client_Id')]",
+                "AZURE_CLIENT_SECRET": "[concat('@Microsoft.KeyVault(VaultName=', variables('keyVaultName'), ';SecretName=', variables('clientSecretSecretName'), ')')]",
+                "AZURE_TENANT_ID": "[parameters('Azure_Tenant_Id')]",
+                "AZURE_DATA_COLLECTION_ENDPOINT": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))).logsIngestion.endpoint]",
+                "AZURE_DATA_COLLECTION_RULE_ID_COMPANY_TABLES": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('portfolioCompaniesRuleName'))).immutableId]",
+                "AZURE_DATA_COLLECTION_RULE_ID_DATA_TABLES": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('dataRuleName'))).immutableId]",
+                "Portfolio_Companies_Table_Name": "[parameters('Portfolio_Companies_Table_Name')]",
+                "SCOPE": "[variables('scope')]",
+                "WorkspaceID": "[reference(resourceId(resourceGroup().name, 'Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName')), '2021-06-01').customerId]"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), variables('storageTableDataContributorRoleId'))]",
+            "scope": "[concat('Microsoft.Storage/storageAccounts', '/', variables('storageName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('storageTableDataContributorRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('FunctionName')), '2023-12-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('keyVaultSecretsUserRoleId'), variables('FunctionName'))]",
+            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultSecretsUserRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('FunctionName')), '2023-12-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName'))), variables('storageRoleDefinitionId'))]",
+            "scope": "[concat('Microsoft.Storage/storageAccounts', '/', tolower(variables('FunctionName')))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName')))]",
+                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('storageRoleDefinitionId'))]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('FunctionName')), '2023-12-01', 'Full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+            }
+        },
+        {
+            "type": "Microsoft.Resources/deploymentScripts",
+            "apiVersion": "2020-10-01",
+            "name": "WaitSection",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]",
+                "[resourceId('Microsoft.Web/sites/config', variables('FunctionName'), 'appsettings')]"
+            ],
+            "kind": "AzurePowerShell",
+            "properties": {
+                "azPowerShellVersion": "7.0",
+                "scriptContent": "start-sleep -Seconds 60",
+                "cleanupPreference": "Always",
+                "retentionInterval": "PT1H"
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites/extensions",
+            "apiVersion": "2022-09-01",
+            "name": "[format('{0}/{1}', variables('FunctionName'), 'onedeploy')]",
+            "dependsOn": [
+                "WaitSection"
+            ],
+            "properties": {
+                "packageUri": "https://github.com/harsh-maradia/Harsh-Azure-Connectors/raw/refs/heads/main/bitsight-vnet-test-4functions/BitSight310Updated.zip",
+                "remoteBuild": true
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2023-05-01",
+            "name": "[concat(variables('FunctionName'), '/default/azure-webjobs-hosts')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('FunctionName'), 'default')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2023-05-01",
+            "name": "[concat(variables('FunctionName'), '/default/azure-webjobs-secrets')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('FunctionName'), 'default')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/fileServices/shares",
+            "apiVersion": "2023-05-01",
+            "name": "[concat(variables('FunctionName'), '/default/', tolower(variables('FunctionName')))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/fileServices', variables('FunctionName'), 'default')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('FunctionName'))]"
+            ],
+            "properties": {
+                "shareQuota": 5120
+            }
+        }
+    ]
+}
