@@ -150,14 +150,7 @@
             "type": "string",
             "defaultValue": "10.20.2.0/27",
             "metadata": {
-                "description": "Subnet hosting the private endpoints for Storage, Key Vault and Azure Monitor."
-            }
-        },
-        "EnableKeyVaultPurgeProtection": {
-            "type": "bool",
-            "defaultValue": false,
-            "metadata": {
-                "description": "Enable purge protection on the Key Vault. Once enabled it cannot be disabled and blocks re-using the vault name until the retention period ends."
+                "description": "Subnet hosting the private endpoints for Storage and Azure Monitor."
             }
         }
     },
@@ -174,7 +167,6 @@
         "deploymentStorageContainerName": "[concat('app-package-', 'bitsight')]",
         "storageRoleDefinitionId": "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
         "storageName": "[tolower(variables('FunctionName'))]",
-        "keyVaultName": "[concat('kv', uniqueString(resourceGroup().id, 'bitsight'))]",
         "vnetName": "[concat(variables('FunctionName'), '-vnet')]",
         "functionSubnetName": "snet-func",
         "privateEndpointSubnetName": "snet-pe",
@@ -183,21 +175,16 @@
         "amplsName": "[concat(variables('FunctionName'), '-ampls')]",
         "peBlobName": "[concat(variables('FunctionName'), '-pe-blob')]",
         "peTableName": "[concat(variables('FunctionName'), '-pe-table')]",
-        "peVaultName": "[concat(variables('FunctionName'), '-pe-vault')]",
         "peMonitorName": "[concat(variables('FunctionName'), '-pe-ampls')]",
         "monitorDnsSuffix": "[if(equals(environment().name, 'AzureUSGovernment'), 'us', if(equals(environment().name, 'AzureChinaCloud'), 'cn', 'com'))]",
         "agentSvcDnsSuffix": "[if(equals(environment().name, 'AzureUSGovernment'), 'us', if(equals(environment().name, 'AzureChinaCloud'), 'cn', 'net'))]",
         "blobDnsZoneName": "[concat('privatelink.blob.', environment().suffixes.storage)]",
         "tableDnsZoneName": "[concat('privatelink.table.', environment().suffixes.storage)]",
-        "vaultDnsZoneName": "[replace(environment().suffixes.keyvaultDns, '.vault.', 'privatelink.vaultcore.')]",
         "monitorDnsZoneName": "[concat('privatelink.monitor.azure.', variables('monitorDnsSuffix'))]",
         "omsDnsZoneName": "[concat('privatelink.oms.opinsights.azure.', variables('monitorDnsSuffix'))]",
         "odsDnsZoneName": "[concat('privatelink.ods.opinsights.azure.', variables('monitorDnsSuffix'))]",
         "agentSvcDnsZoneName": "[concat('privatelink.agentsvc.azure-automation.', variables('agentSvcDnsSuffix'))]",
-        "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3",
-        "keyVaultSecretsUserRoleId": "4633458b-17de-408a-b874-0445c86b69e6",
-        "apiTokenSecretName": "API-token",
-        "clientSecretSecretName": "Azure-Client-Secret"
+        "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
     },
     "resources": [
         {
@@ -1040,29 +1027,6 @@
         {
             "type": "Microsoft.Network/privateDnsZones",
             "apiVersion": "2020-06-01",
-            "name": "[variables('vaultDnsZoneName')]",
-            "location": "global",
-            "properties": {}
-        },
-        {
-            "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-            "apiVersion": "2020-06-01",
-            "name": "[concat(variables('vaultDnsZoneName'), '/', variables('vnetName'), '-link')]",
-            "location": "global",
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', variables('vaultDnsZoneName'))]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-            ],
-            "properties": {
-                "registrationEnabled": false,
-                "virtualNetwork": {
-                    "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Network/privateDnsZones",
-            "apiVersion": "2020-06-01",
             "name": "[variables('monitorDnsZoneName')]",
             "location": "global",
             "properties": {}
@@ -1245,52 +1209,6 @@
             }
         },
         {
-            "type": "Microsoft.KeyVault/vaults",
-            "apiVersion": "2023-07-01",
-            "name": "[variables('keyVaultName')]",
-            "location": "[resourceGroup().location]",
-            "properties": {
-                "tenantId": "[subscription().tenantId]",
-                "sku": {
-                    "family": "A",
-                    "name": "standard"
-                },
-                "enableRbacAuthorization": true,
-                "enableSoftDelete": true,
-                "softDeleteRetentionInDays": 90,
-                "enablePurgeProtection": "[if(parameters('EnableKeyVaultPurgeProtection'), true(), null())]",
-                "publicNetworkAccess": "Disabled",
-                "networkAcls": {
-                    "bypass": "None",
-                    "defaultAction": "Deny",
-                    "ipRules": [],
-                    "virtualNetworkRules": []
-                }
-            }
-        },
-        {
-            "type": "Microsoft.KeyVault/vaults/secrets",
-            "apiVersion": "2023-07-01",
-            "name": "[concat(variables('keyVaultName'), '/', variables('apiTokenSecretName'))]",
-            "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-            ],
-            "properties": {
-                "value": "[parameters('API_token')]"
-            }
-        },
-        {
-            "type": "Microsoft.KeyVault/vaults/secrets",
-            "apiVersion": "2023-07-01",
-            "name": "[concat(variables('keyVaultName'), '/', variables('clientSecretSecretName'))]",
-            "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-            ],
-            "properties": {
-                "value": "[parameters('Azure_Client_Secret')]"
-            }
-        },
-        {
             "type": "Microsoft.Insights/privateLinkScopes",
             "apiVersion": "2021-07-01-preview",
             "name": "[variables('amplsName')]",
@@ -1443,52 +1361,6 @@
         {
             "type": "Microsoft.Network/privateEndpoints",
             "apiVersion": "2024-05-01",
-            "name": "[variables('peVaultName')]",
-            "location": "[resourceGroup().location]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]"
-            ],
-            "properties": {
-                "subnet": {
-                    "id": "[variables('privateEndpointSubnetId')]"
-                },
-                "privateLinkServiceConnections": [
-                    {
-                        "name": "[variables('peVaultName')]",
-                        "properties": {
-                            "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                            "groupIds": [
-                                "vault"
-                            ]
-                        }
-                    }
-                ]
-            }
-        },
-        {
-            "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
-            "apiVersion": "2024-05-01",
-            "name": "[concat(variables('peVaultName'), '/default')]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/privateEndpoints', variables('peVaultName'))]",
-                "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('vaultDnsZoneName'), concat(variables('vnetName'), '-link'))]"
-            ],
-            "properties": {
-                "privateDnsZoneConfigs": [
-                    {
-                        "name": "[replace(variables('vaultDnsZoneName'), '.', '-')]",
-                        "properties": {
-                            "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('vaultDnsZoneName'))]"
-                        }
-                    }
-                ]
-            }
-        },
-        {
-            "type": "Microsoft.Network/privateEndpoints",
-            "apiVersion": "2024-05-01",
             "name": "[variables('peMonitorName')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
@@ -1498,7 +1370,7 @@
                 "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'dce')]",
                 "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'sentinel-workspace')]",
                 "[resourceId('Microsoft.Insights/privateLinkScopes/scopedResources', variables('amplsName'), 'appinsights-workspace')]",
-                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peVaultName'), 'default')]"
+                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]"
             ],
             "properties": {
                 "subnet": {
@@ -1616,12 +1488,8 @@
                 "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]",
                 "[guid(resourceId('Microsoft.Storage/storageAccounts', tolower(variables('FunctionName'))), variables('storageRoleDefinitionId'))]",
                 "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), variables('storageTableDataContributorRoleId'))]",
-                "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('keyVaultSecretsUserRoleId'), variables('FunctionName'))]",
-                "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), variables('apiTokenSecretName'))]",
-                "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), variables('clientSecretSecretName'))]",
                 "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peBlobName'), 'default')]",
                 "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peTableName'), 'default')]",
-                "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peVaultName'), 'default')]",
                 "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', variables('peMonitorName'), 'default')]"
             ],
             "properties": {
@@ -1630,7 +1498,7 @@
                 "AzureWebJobsStorage__credential": "managedidentity",
                 "AzureWebJobsStorage__blobServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob]",
                 "AzureWebJobsStorage__tableServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table]",
-                "API_token": "[concat('@Microsoft.KeyVault(VaultName=', variables('keyVaultName'), ';SecretName=', variables('apiTokenSecretName'), ')')]",
+                "API_token": "[parameters('API_token')]",
                 "Companies": "[parameters('Companies')]",
                 "Alerts_Table_Name": "[parameters('Alerts_Table_Name')]",
                 "Breaches_Table_Name": "[parameters('Breaches_Table_Name')]",
@@ -1639,7 +1507,7 @@
                 "Schedule": "[parameters('Schedule')]",
                 "Schedule_Portfolio": "[parameters('Schedule_Portfolio')]",
                 "AZURE_CLIENT_ID": "[parameters('Azure_Client_Id')]",
-                "AZURE_CLIENT_SECRET": "[concat('@Microsoft.KeyVault(VaultName=', variables('keyVaultName'), ';SecretName=', variables('clientSecretSecretName'), ')')]",
+                "AZURE_CLIENT_SECRET": "[parameters('Azure_Client_Secret')]",
                 "AZURE_TENANT_ID": "[parameters('Azure_Tenant_Id')]",
                 "AZURE_DATA_COLLECTION_ENDPOINT": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('endpointName'))).logsIngestion.endpoint]",
                 "AZURE_DATA_COLLECTION_RULE_ID_COMPANY_TABLES": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('portfolioCompaniesRuleName'))).immutableId]",
@@ -1660,21 +1528,6 @@
             ],
             "properties": {
                 "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('storageTableDataContributorRoleId'))]",
-                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('FunctionName')), '2023-12-01', 'Full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-            }
-        },
-        {
-            "type": "Microsoft.Authorization/roleAssignments",
-            "apiVersion": "2022-04-01",
-            "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), variables('keyVaultSecretsUserRoleId'), variables('FunctionName'))]",
-            "scope": "[concat('Microsoft.KeyVault/vaults', '/', variables('keyVaultName'))]",
-            "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[resourceId('Microsoft.Web/sites', variables('FunctionName'))]"
-            ],
-            "properties": {
-                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultSecretsUserRoleId'))]",
                 "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('FunctionName')), '2023-12-01', 'Full').identity.principalId]",
                 "principalType": "ServicePrincipal"
             }
